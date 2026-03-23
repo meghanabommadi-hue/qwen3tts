@@ -1,0 +1,40 @@
+# Core inference
+# NOTE: torch, sglang, and flashinfer are NOT listed here.
+# They must be installed separately in setup.sh (torch first, then sglang[all],
+# then flashinfer) because flashinfer is not on PyPI and sglang requires a
+# specific torch version to already be present.
+# transformers==4.57.3 and sglang==0.5.2 are pinned in setup.sh — do not add them here
+# (sglang 0.5.9+ breaks with transformers git HEAD; 4.57.3 + 0.5.2 is the working combo)
+accelerate>=0.34.0
+onnxruntime-gpu>=1.19.0
+onnx>=1.16.0
+
+# Audio processing
+librosa>=0.10.0
+soundfile>=0.12.0
+torchaudio>=2.3.0
+numpy>=1.26.0
+scipy>=1.13.0
+
+# WebSocket & HTTP server
+websockets>=12.0
+aiohttp>=3.9.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+
+# Redis (multi-process mode) — asyncio support is built-in from redis>=4.2, no extra needed
+redis>=5.0.0
+
+# Configuration & validation
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+
+# Observability
+structlog>=24.0.0
+prometheus-client>=0.20.0
+
+# Utilities
+huggingface-hub>=0.24.0
+requests>=2.32.0
+einops>=0.8.0
