@@ -83,17 +83,19 @@ if not sglang_dir:
     print("  sglang package not found, skipping")
     sys.exit(0)
 
-# Match any bare class-body annotation at 4-space indent with no default value.
+# Match bare class-body annotations at ANY indent level with no default value.
 # These become required dataclass fields when transformers git HEAD makes
 # PretrainedConfig a @dataclass, breaking sglang at import time.
-bare_ann = re.compile(r'^(\s{4})(\w+): ([A-Za-z_]\w*)$', re.MULTILINE)
+# Uses \s+ (not \s{4}) to catch nested-class annotations (8-space, 12-space, etc.)
+bare_ann = re.compile(r'^(\s+)(\w+): ([A-Za-z_][\w\[\], ]*)$', re.MULTILINE)
 patched = 0
 for pyfile in sglang_dir.rglob("*.py"):
     src = pyfile.read_text()
     new_src = bare_ann.sub(r'\1\2: "ClassVar[type]"', src)
     if new_src == src:
         continue
-    if "ClassVar" not in new_src:
+    # Ensure ClassVar is imported in the patched file
+    if "from typing import ClassVar" not in new_src:
         if "from typing import" in new_src:
             new_src = new_src.replace("from typing import", "from typing import ClassVar,", 1)
         else:
