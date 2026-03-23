@@ -70,10 +70,11 @@ echo "==> Patching sglang config files for transformers git HEAD compatibility"
 # annotation like `vision_config: SomeConfig` inside a PretrainedConfig subclass
 # is treated as a required dataclass field, causing:
 #   TypeError: non-default argument 'vision_config' follows default argument
-# Fix: replace all such bare annotations with ClassVar[type] across all sglang
-# config files (deepseekvl2.py, janus_pro.py, and any future additions).
+# Fix: use AST to find PretrainedConfig subclasses, then with line-precise regex
+# replace only their bare class-level annotations (no default) with ClassVar[type].
+# This avoids corrupting function parameter annotations (e.g. `src: StreamExecutor`).
 python3 - <<'PYEOF'
-import sys, re, pathlib
+import sys, re, ast, pathlib
 
 sglang_dir = next(
     (p for p in pathlib.Path(sys.prefix).rglob("sglang") if p.is_dir() and (p / "__init__.py").exists()),
@@ -83,18 +84,48 @@ if not sglang_dir:
     print("  sglang package not found, skipping")
     sys.exit(0)
 
-# Match bare class-body annotations at ANY indent level with no default value.
-# These become required dataclass fields when transformers git HEAD makes
-# PretrainedConfig a @dataclass, breaking sglang at import time.
-# Uses \s+ (not \s{4}) to catch nested-class annotations (8-space, 12-space, etc.)
-bare_ann = re.compile(r'^(\s+)(\w+): ([A-Za-z_][\w\[\], ]*)$', re.MULTILINE)
+# Bare annotation at exactly the class body level (4 or 8 spaces, no '=' after).
+# We only replace lines that AST tells us belong to a PretrainedConfig subclass body.
+bare_ann = re.compile(r'^( +)(\w+): ([A-Za-z_][\w\[\], ]*)$')
+
+def pretrained_config_class_linenos(tree):
+    """Return set of line numbers that are inside a PretrainedConfig subclass body."""
+    lines = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        bases = [getattr(b, 'id', getattr(b, 'attr', '')) for b in node.bases]
+        if not any('Config' in b or 'PretrainedConfig' in b for b in bases):
+            continue
+        # Collect line numbers of all AnnAssign nodes (bare annotations) in this class
+        for child in ast.walk(node):
+            if isinstance(child, ast.AnnAssign) and child.value is None:
+                lines.add(child.lineno)
+    return lines
+
 patched = 0
 for pyfile in sglang_dir.rglob("*.py"):
     src = pyfile.read_text()
-    new_src = bare_ann.sub(r'\1\2: "ClassVar[type]"', src)
-    if new_src == src:
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
         continue
-    # Ensure ClassVar is imported in the patched file
+    target_lines = pretrained_config_class_linenos(tree)
+    if not target_lines:
+        continue
+    lines = src.splitlines(keepends=True)
+    changed = False
+    for i, line in enumerate(lines):
+        lineno = i + 1  # ast uses 1-based line numbers
+        if lineno not in target_lines:
+            continue
+        m = bare_ann.match(line.rstrip('\n'))
+        if m:
+            lines[i] = f'{m.group(1)}{m.group(2)}: "ClassVar[type]"\n'
+            changed = True
+    if not changed:
+        continue
+    new_src = ''.join(lines)
     if "from typing import ClassVar" not in new_src:
         if "from typing import" in new_src:
             new_src = new_src.replace("from typing import", "from typing import ClassVar,", 1)
